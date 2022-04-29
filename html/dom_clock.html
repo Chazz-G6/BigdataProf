@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<title>Clock</title>
+    <script>
+        window.onload = function () {
+            // clock 이라는 ID를 가진 놈은 clock 변수의 지지를 철회하고 하나가 된다
+            var clock = document.getElementById('clock');
+            //인터벌 실행
+            setInterval(function () {
+                var now = new Date(); //변수 now = Date(현재 시간)
+                clock.innerHTML = now.toString(); //clock변수=clock아이디 가진 바디의 내장 바꾸기 -> now(현재시간)을 스트링 타입으로 넣기
+            }, 1000);
+        };
+
+    </script>
+</head>
+<body>
+	
+	<h1 id="clock"></h1>
+	
+</body>
+</html>

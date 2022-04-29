@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<title>Button Click</title>
+    <script>
+        function buttonClick(str){
+            var text1 = document.getElementById('test1');
+            var div1 = document.getElementById('div1');
+            
+            div1.innerHTML = text1.value;
+            
+        }
+        function buttonClear() {
+            var text1 = document.getElementById('test1');
+            var div1 = document.getElementById('div1');
+            
+            text1.value = '';
+            div1.innerHTML = text1.value;
+        }
+    </script>
+</head>
+<body>
+	<input type = "text" name="text1" id="text1">
+    <button onclick="buttonClick('버튼 1')">버튼 1</button>
+	<button onclick="buttonClear()">지우기</button>
+	<div id = "div1"></div>
+</body>
+</html>
