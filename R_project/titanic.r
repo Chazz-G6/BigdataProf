@@ -6,18 +6,21 @@ titanic = read.csv("./titanic3.csv")
 #타이타닉 데이터의 필요 없는 칼럼 제외
 titanic <- titanic[, !names(titanic) %in% c("home.dest", "boat", "body")]
 str(titanic)
-
+titanic$embarked <- as.factor(titanic$embarked)
+titanic$sex <- as.factor(titanic$sex)
 titanic$pclass <- as.factor(titanic$pclass) # 1,2,3등석 표시 정보를 정수가 아닌 범주형으로 변경
 titanic$name <- as.character(titanic$name) # 이름을 char 형식으로
 titanic$ticket <- as.character(titanic$ticket) # ticket 번호를 char 형식으로
 titanic$cabin <- as.character(titanic$cabin) # cabin 객실 번호를 char 형식으로
-titanic$survived <- factor(titanic$survived, levels=c(0, 1), labels = c("dead", "survived"))
+titanic$survived <- factor(titanic$survived, levels=c(0, 1), labels = 
+c("dead", "survived"))
 # 생존 여부를 0과 1의 범주형으로 (사망, 생존 레이블 이용)
 str(titanic)
-
+levels(titanic$embarked)
+table(titanic$embarked)
 levels(titanic$embarked) [1] <- NA #Null로 표시되는 ""값을 NA로
 table(titanic$embarked, useNA="always") # 항상
-
+str(titanic)
 titanic$cabin <- ifelse(titanic$cabin == "", NA, titanic$cabin)
 # cabin 칼럼의 빈 공간 또한 NA로 치환
 
@@ -93,7 +96,7 @@ predicted <- c(1, 0, 0, 1, 1)
 actual <- c(1, 0, 0, 0, 0)
 #일 때 해당 모델의 accuracy는 =
 sum(predicted == actual) / NROW(predicted)
-install.packages("rpart")
+
 
 #의사결정 트리 모델 rpart 라이브러리를 이용하여 의사 결정 트리 만들기
 library(rpart)
@@ -121,13 +124,142 @@ rpart_result <- foreach(f=folds) %do% {
 }
 #foreach는 folds 전체에 대한 결과를 또 다시 리스트로 묶는다.
 
-evaluation <- function(lst) {
+#정확도 평가
+
+evaluation <- function(lst) { 
     accuracy <- sapply(lst, function(one_result) {
-        return(sum(one_result$predicted == one_result$actual) / NROW(one_result$actual))
-    })
+        #rpart_result의 리스트 형식인 one_result를 입력받아 sapply를 수행하는 함수인 evaluation
+        return(sum(one_result$predicted == one_result$actual) 
+        / NROW(one_result$actual)) #predicted data와 actual data를 통해 구해진 결과를 반환
+        })
     print(sprintf("MEAN +/- SD: %.3f +/- %.3f",
                     mean(accuracy), sd(accuracy)))
+    #정확도 계산 결과 rpart 모델의 accuracy는 0.801
     return(accuracy)
 }
 (rpart_accuracy <- evaluation(rpart_result))
-#p.556
+#이후 rpart_result를 입력받은 evaluation 함수로 계산된 accuracy를 rpart_accuracy에 반환..
+
+# 조건부 추론 나무
+str(titanic.train)
+library(party)
+ctree_result <- foreach(f=folds) %do% {
+    model_ctree <- ctree(
+        survived ~ pclass + sex + age + sibsp + parch + fare + embarked,
+        data=f$train)
+    predicted <- predict(model_ctree, newdata = f$validation,
+                        type="response")
+    return(list(actual=f$validation$survived, predicted=predicted))
+}
+(ctree_accuracy <- evaluation(ctree_result))
+
+plot(density(rpart_accuracy), main="rpart VS ctree")
+lines(density(ctree_accuracy), col="red", lty="dashed")
+
+
+View(titanic.train[order(titanic.train$ticket),
+    c("ticket", "parch", "name", "cabin", "embarked")])
+
+sum(is.na(titanic.train$ticket))
+
+sum(is.na(titanic.train$embarked))
+
+sum(is.na(titanic.train$cabin))
+
+library(plyr)
+
+family_result <- foreach(f=folds) %do% {
+    f$train$type <- "T"
+    f$validation$type <- "V"
+    all <- rbind(f$train, f$validation)
+    ctree_model <- ctree(
+        survived ~ pclass + sex + age + sibsp + parch + fare + embarked,
+        data=f$train)
+    all$prob <- sapply(
+        predict(ctree_model, type="prob", newdata=all),
+        function(result) { result[1] })
+
+    family_idx <- 0
+    ticket_based_family_id <- ddply(all, .(ticket), function(rows) {
+        family_idx <<- family_idx + 1
+        return(data.frame(family_id=paste0("TICKET_", family_idx)))
+    })
+
+}
+all <- adply(all,
+        1,
+        function(row) {
+            family_id <- NA
+            if (!is.na(row$ticket)) {
+                family_id <- subset(ticket_based_family_id,
+                                    ticket == row$ticket)$family_id
+            }
+            return(data.frame(family_id=family_id, stringsAsFactors = TRUE))
+        })
+
+str(ticket_based_family_id)
+
+head(ticket_based_family_id)
+
+str(all)
+
+all <- ddply(all,
+            .(family_id),
+            function(rows) {
+                rows$avg_prob <- mean(rows$prob)
+                return(rows)
+            })
+
+
+all <- ddply(all, .(family_id), function(rows) {
+    rows$maybe_parent <- FALSE
+    rows$maybe_child <- FALSE
+    if (NROW(rows) == 1 ||
+        sum(rows$parch) == 0 ||
+        NROW(rows) == sum(is.na(rows$age))) {
+        return(rows)
+    }
+    max_age <- max(rows$age, na.rm=TRUE)
+    min_age <- min(rows$age, na.rm=TRUE)
+    return(adply(rows, 1, function(row) {
+        if (!is.na(row$age) && !is.na(row$sex)) {
+            row$maybe_parent <- (max_age - row$age) < 10
+            row$maybe_child <- (row$age - min_age) < 10
+        }
+        return(row)
+    }))
+})
+
+all <- ddply(all, .(family_id), function(rows) {
+    rows$avg_parent_prob <- rows$avg_prob
+    rows$avg_child_prob <- rows$avg_prob
+    if (NROW(rows) == 1 || sum(rows$parch) == 0) {
+        return(rows)
+    }
+    parent_prob <- subset(rows, maybe_parent == TRUE) [, "prob"]
+    if (NROW(parent_prob) > 0) {
+        rows$avg_parent_prob <- mean(parent_prob)
+    }
+    child_prob <- subset(rows, maybe_child == TRUE) [, "prob"]
+    if (NROW(child_prob) > 0) {
+        rows$avg_child_prob <- mean(child_prob)
+    }
+    return(rows)
+})
+
+str(all)
+
+f$train <- subset(all, type == "T")
+f$validation <- subset(all, type == "V")
+
+(m <- ctree(survived ~ pclass + sex + age + sibsp + parch + fare + embarked + 
+maybe_parent + maybe_child + age + sex + avg_prob + avg_parent_prob + avg_child_prob,
+            data=f$train))
+
+
+
+print(m)
+
+predicted <- predict(m, newdata=f$validation)
+
+print(m)
