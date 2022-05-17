@@ -7,6 +7,8 @@ public class ArrayListDemo {
         ArrayList<Integer> scores = new ArrayList<>();
         int data;
         int sum = 0;
+        int s = 1;
+        int ss = 10;
 
         while((data = in.nextInt()) >= 0 )
             scores.add(data);
@@ -15,5 +17,7 @@ public class ArrayListDemo {
         sum += scores.get(i);
 
         System.out.println("평균 = " + (double)sum / scores.size());
+
+        
     }
 }

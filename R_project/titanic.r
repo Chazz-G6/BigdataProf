@@ -263,3 +263,90 @@ print(m)
 predicted <- predict(m, newdata=f$validation)
 
 print(m)
+
+family_result <- foreach(f=folds) %do% {
+    f$train$type <- "T"
+    f$validation$type <- "V"
+    all <- rbind(f$train, f$validation)
+    ctree_model <- ctree(
+        survived ~ pclass + sex + age + sibsp + parch + fare + embarked,
+        data=f$train)
+    all$prob <- sapply(predict(ctree_model, type="prob", newdata=all),
+                    function(result){ result[1] })
+    #티켓 번호를 사용한 family_id
+    family_idx <- 0
+    ticket_based_family_id <- ddply(all, .(ticket), function(rows) {
+        family_idx <<- family_idx + 1
+        return(data.frame(family_id=paste0("TICKET_", family_idx)))
+    })
+    all <- adply(all, 1,
+                function(row) {
+                family_id <- NA
+                if (!is.na(row$ticket)) {
+                    family_id <- subset(ticket_based_family_id,
+                                        ticket == row$ticket)$family_id
+                }
+                return(data.frame(family_id=family_id))
+            })
+
+    #avg_prob
+    all <- ddply(all,
+                .(family_id),
+                function(rows) {
+                    row$avg_prob <- mean(rows$prob)
+                    return(rows)
+                })
+
+    #maybe_parent, maybe_child
+    all <- ddply(all, .(family_id), function(rows) {
+        rows$maybe_parent <- FALSE
+        rows$maybe_child <- FALSE
+        if (NROW(rows) == 1 ||
+            sum(rows$parch) == 0 ||
+            NROW(rows) == sum(is.na(rows$age))) {
+        return(rows)
+        }
+        max_age <- max(rows$age, na.rm=TRUE)
+        min_age <- min(rows$age, na.rm=TRUE)
+
+    return(adply(rows, 1, function(rows) {
+        if (!is.na(row$age) && !is.na(row$sex)) {
+            row$maybe_parent <- (max_age - row$age) < 10
+            row$maybe_child <- (row$age - min_age) < 10
+        }
+        return(row)
+    }))
+})
+
+# avg_parent_prob, avg_child_prob
+all <- ddply(all, .(family_id), function(rows) {
+    rows$avg_parent_prob <- rows$avg_prob
+    rows$avg_child_prob <- rows$avg_prob
+    if (NROW(rows) == 1 || sum(rows$parch) == 0) {
+        return(rows)
+    }
+    parent_prob <- subset(rows, maybe_parent == TRUE) [, "prob"]
+    if (NROW(parent_prob) > 0) {
+        rows$avg_parent_prob <- mean(parent_prob)
+    }
+    child_prob <- subset(rows, maybe_child == TRUE) [, "prob"]
+    if (NROW(child_prob) > 0) {
+        rows$avg_child_prob <- mean(child_prob)
+    }
+    return(rows)
+})
+
+    # ctree 모델
+    f$train <- subset(all, type == "T")
+    f$validation <- subset(all, type == "V")
+    (m <- ctree(survived ~ pclass + sex + age + sibsp + 
+    parch + fare + embarked + maybe_parent + maybe_child + 
+    age + sex + avg_prob + avg_parent_prob + avg_child_prob, data=f$train))
+
+    print(m)
+    predicted <- predict(m, newdata=f$validation)
+    return(list(actual=f$validation$survived, predicted=predicted))
+}
+
+
+
